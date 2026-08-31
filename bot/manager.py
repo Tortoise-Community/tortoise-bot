@@ -4,7 +4,11 @@ import json
 from typing import Any, Optional
 import asyncpg
 
-from bot.constants import challenge_default_points, challenge_test_reveal_cost
+from bot.constants import (
+    challenge_default_points,
+    challenge_optimal_solution_bonus,
+    challenge_test_reveal_cost,
+)
 from bot.utils.challenge import Problem, TestCase, parse_jsonish
 
 class Database:
@@ -478,12 +482,23 @@ class ChallengeManager:
                 problem_slug TEXT NOT NULL,
                 user_id BIGINT NOT NULL,
                 language TEXT NOT NULL,
+                solution TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL,
                 passed_tests INTEGER NOT NULL DEFAULT 0,
                 total_tests INTEGER NOT NULL DEFAULT 0,
                 error_message TEXT,
+                optimal_awarded_by BIGINT,
+                optimal_awarded_at TIMESTAMPTZ,
                 submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
+            """
+        )
+        await self.db.pool.execute(
+            """
+            ALTER TABLE challenge_submissions
+                ADD COLUMN IF NOT EXISTS solution TEXT NOT NULL DEFAULT '',
+                ADD COLUMN IF NOT EXISTS optimal_awarded_by BIGINT,
+                ADD COLUMN IF NOT EXISTS optimal_awarded_at TIMESTAMPTZ
             """
         )
         await self.db.pool.execute(
@@ -605,6 +620,35 @@ class ChallengeManager:
         slug: str,
         user_id: int,
         language: str,
+        solution: str,
+        status: str,
+        passed: int,
+        total: int,
+        error: Optional[str],
+    ) -> int:
+        return await self.db.pool.fetchval(
+            """
+            INSERT INTO challenge_submissions
+                (guild_id, problem_slug, user_id, language, solution, status,
+                 passed_tests, total_tests, error_message)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            RETURNING id
+            """,
+            guild_id,
+            slug,
+            user_id,
+            language,
+            solution,
+            status,
+            passed,
+            total,
+            error,
+        )
+
+    async def update_submission_result(
+        self,
+        submission_id: int,
+        *,
         status: str,
         passed: int,
         total: int,
@@ -612,19 +656,68 @@ class ChallengeManager:
     ):
         await self.db.pool.execute(
             """
-            INSERT INTO challenge_submissions
-                (guild_id, problem_slug, user_id, language, status, passed_tests, total_tests, error_message)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            UPDATE challenge_submissions
+            SET status = $2, passed_tests = $3, total_tests = $4, error_message = $5
+            WHERE id = $1
             """,
-            guild_id,
-            slug,
-            user_id,
-            language,
+            submission_id,
             status,
             passed,
             total,
             error,
         )
+
+    async def get_submission_solution(self, submission_id: int):
+        return await self.db.pool.fetchrow(
+            """
+            SELECT problem_slug, user_id, language, solution
+            FROM challenge_submissions
+            WHERE id = $1 AND status = 'accepted'
+            """,
+            submission_id,
+        )
+
+    async def award_optimal_solution(self, submission_id: int, moderator_id: int):
+        async with self.db.pool.acquire() as connection:
+            async with connection.transaction():
+                submission = await connection.fetchrow(
+                    """
+                    SELECT guild_id, user_id, status, optimal_awarded_at
+                    FROM challenge_submissions
+                    WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    submission_id,
+                )
+                if submission is None:
+                    return "missing", None, None
+                if submission["status"] != "accepted":
+                    return "not_accepted", None, None
+                if submission["optimal_awarded_at"] is not None:
+                    return "already_awarded", submission["user_id"], None
+
+                await connection.execute(
+                    """
+                    UPDATE challenge_submissions
+                    SET optimal_awarded_by = $2, optimal_awarded_at = NOW()
+                    WHERE id = $1
+                    """,
+                    submission_id,
+                    moderator_id,
+                )
+                points = await connection.fetchval(
+                    """
+                    INSERT INTO points (guild_id, user_id, points)
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (guild_id, user_id)
+                    DO UPDATE SET points = points.points + EXCLUDED.points
+                    RETURNING points
+                    """,
+                    submission["guild_id"],
+                    submission["user_id"],
+                    challenge_optimal_solution_bonus,
+                )
+                return "awarded", submission["user_id"], points
 
     async def award_solve(self, *, guild_id: int, slug: str, user_id: int, points: int) -> bool:
         result = await self.db.pool.execute(

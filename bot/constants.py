@@ -221,6 +221,7 @@ challenge_supported_language_values = tuple(
     language_value for _, language_value in challenge_supported_languages
 )
 challenge_default_points = 100
+challenge_optimal_solution_bonus = 50
 challenge_test_reveal_cost = 50
 challenge_default_max_tests = 30
 challenge_problem_title_min_length = 2
