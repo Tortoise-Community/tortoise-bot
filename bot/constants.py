@@ -64,6 +64,7 @@ challenge_logs_public_channel_id = 1524682332005728257
 bait_channel_id = 1461666781612740750
 introduction_channel_id = 1487413734056923236
 join_a_team_channel_id = 1489264049983197246
+mod_mail_thread_channel_id = 1546927039553216552
 
 # Team channels
 team_plan_channel_id = 1498315759506686115

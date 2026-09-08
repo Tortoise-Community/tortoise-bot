@@ -12,7 +12,7 @@ from discord import app_commands
 from bot.constants import (mod_mail_emoji_id, event_emoji_id, staff_application_emoji_id, bug_emoji_id,
                            ban_appeal_server_id, tortoise_guild_id, admin_role_id, mod_mail_ping_role_id,
                            moderator_role_id, jr_moderator_role_id, staff_channel_id, bot_log_channel_id,
-                           mod_mail_log_channel_id, code_submissions_log_channel_id, default_color)
+                           code_submissions_log_channel_id, default_color, mod_mail_thread_channel_id)
 from bot.utils.checks import check_if_tortoise_staff
 from bot.utils.cooldown import CoolDown
 from bot.utils.embed_handler import authored, failure, success, info, warning
@@ -111,9 +111,9 @@ class ModMailCloseReasonModal(discord.ui.Modal, title="Close Mod Mail with Respo
             await interaction.response.send_message("This mod mail is no longer active.", ephemeral=True)
             return
 
-        channel = interaction.guild.get_channel(channel_id)
+        channel = interaction.guild.get_thread(channel_id)
         await interaction.response.defer(ephemeral=True)
-        await self.cog.close_mod_mail(user_id, channel, closed_by=mod, reason=staff_response)
+        await self.cog.close_mod_mail(user_id, channel, closed_by=mod, reason=staff_response, archive_thread=True)
 
         if channel:
             try:
@@ -298,39 +298,32 @@ class ModMailAcceptView(discord.ui.View):
 
         await interaction.response.defer(ephemeral=True)
 
-        category = self.cog.staff_channel.category
-        overwrites = {
-            interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            self.cog.bot.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-            self.cog.admin_role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-            self.cog.moderator_role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-            self.cog.jr_moderator_role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
-        }
-
-        channel_name = f"modmail-{user.name}"
-        channel = await interaction.guild.create_text_channel(
-            name=channel_name,
-            category=category,
-            overwrites=overwrites,
-            topic=f"Mod Mail session for {user} (ID: {user.id})"
-        )
-
-        self.cog.active_mod_mails[user_id] = channel.id
-        self.cog.active_mod_mail_channels[channel.id] = user_id
-        self.cog.pending_mod_mails.remove(user_id)
-
-        await self.cog.bot.modmail_manager.create_session(user_id, channel.id, interaction.message.id)
+        forum_channel = interaction.guild.get_channel(mod_mail_thread_channel_id)
+        thread_name = f"modmail-{user.name}"
 
         embed = success(
             f"{mod.mention} accepted the mod mail for `{user}` (ID: {user.id}).\n\n"
-            "Type `close` to resolve and delete this channel, or use the Resolve button below."
+            "Use the Resolve button below or archive the thread to close."
         )
 
         view = discord.ui.View(timeout=None)
         view.add_item(discord.ui.Button(label="Resolve with Reason", style=discord.ButtonStyle.blurple,
                                         custom_id=f"resolve_{user_id}"))
 
-        await channel.send(content=f"{mod.mention}", embed=embed, view=view)
+        thread_with_message = await forum_channel.create_thread(
+            name=thread_name,
+            content=f"{mod.mention}",
+            embed=embed,
+            view=view,
+            reason=f"Mod Mail session for {user} (ID: {user.id})"
+        )
+        channel = thread_with_message.thread
+
+        self.cog.active_mod_mails[user_id] = channel.id
+        self.cog.active_mod_mail_channels[channel.id] = user_id
+        self.cog.pending_mod_mails.remove(user_id)
+
+        await self.cog.bot.modmail_manager.create_session(user_id, channel.id, interaction.message.id)
 
         user_embed = authored(
             f"{mod.display_name} has joined the chat and will be helping you.\n"
@@ -417,7 +410,6 @@ class TortoiseDM(commands.Cog):
         }
 
         self.bug_report_channel = None
-        self.mod_mail_report_channel = None
         self.code_submissions_channel = None
         self.staff_applications_channel = None
         self.staff_channel = None
@@ -427,7 +419,6 @@ class TortoiseDM(commands.Cog):
         # Server Utility Channels
         self.staff_channel = self.bot.get_channel(staff_channel_id)
         self.bug_report_channel = self.bot.get_channel(bot_log_channel_id)
-        self.mod_mail_report_channel = self.bot.get_channel(mod_mail_log_channel_id)
         self.code_submissions_channel = self.bot.get_channel(code_submissions_log_channel_id)
         self.staff_applications_channel = self.bot.get_channel(bot_log_channel_id)
 
@@ -559,6 +550,13 @@ class TortoiseDM(commands.Cog):
             await interaction.response.send_modal(ModMailCloseReasonModal(self, user_id))
 
     @commands.Cog.listener()
+    async def on_thread_update(self, before: discord.Thread, after: discord.Thread):
+        if after.parent_id == mod_mail_thread_channel_id and not before.archived and after.archived:
+            if after.id in self.active_mod_mail_channels:
+                user_id = self.active_mod_mail_channels[after.id]
+                await self.close_mod_mail(user_id, after, closed_by="Thread Archived", archive_thread=False)
+
+    @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author == self.bot.user:
             return
@@ -581,11 +579,6 @@ class TortoiseDM(commands.Cog):
 
         if message.channel.id in self.active_mod_mail_channels:
             user_id = self.active_mod_mail_channels[message.channel.id]
-
-            if message.content.lower() == "close":
-                await self.close_mod_mail(user_id, message.channel, closed_by=message.author)
-                return
-
             user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
             if user:
                 embed = discord.Embed(description=message.content, color=default_color)
@@ -600,8 +593,8 @@ class TortoiseDM(commands.Cog):
             else:
                 await message.channel.send(embed=failure("User not found, they may have left Discord."))
 
-    async def close_mod_mail(self, user_id: int, channel: discord.TextChannel, closed_by: discord.Member,
-                             reason: str = None):
+    async def close_mod_mail(self, user_id: int, channel: discord.Thread, closed_by: Union[discord.Member, str],
+                             reason: str = None, archive_thread: bool = True):
         user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
 
         if user:
@@ -617,26 +610,6 @@ class TortoiseDM(commands.Cog):
             except discord.HTTPException:
                 pass
 
-        log_content = []
-        if channel:
-            async for msg in channel.history(limit=None, oldest_first=True):
-                time_str = msg.created_at.strftime('%Y-%m-%d %H:%M:%S')
-                if msg.author == self.bot.user and msg.embeds:
-                    embed = msg.embeds[0]
-                    author = embed.author.name if embed.author else "System/Bot"
-                    desc = embed.description or ""
-                    log_content.append(f"[{time_str}] {author}: {desc}")
-                else:
-                    log_content.append(f"[{time_str}] {msg.author.name}: {msg.content}")
-
-        transcript_str = "\n".join(log_content)
-        logs = None
-
-        if transcript_str:
-            file = discord.File(StringIO(transcript_str), filename=f"modmail_transcript_{user_id}.txt")
-            close_info = f"Mod Mail closed by {closed_by}." + (f" Reason: {reason}" if reason else "")
-            logs = await self.mod_mail_report_channel.send(content=close_info, file=file)
-
         if user_id in self.active_mod_mails:
             del self.active_mod_mails[user_id]
         if channel and channel.id in self.active_mod_mail_channels:
@@ -647,7 +620,7 @@ class TortoiseDM(commands.Cog):
 
         await self.bot.modmail_manager.close_session(user_id)
 
-        url = logs.jump_url if logs else "Transcript missing"
+        url = channel.jump_url if channel else "Thread missing"
         await self.update_staff_embed(
             user_id,
             description=url,
@@ -655,11 +628,11 @@ class TortoiseDM(commands.Cog):
             color=discord.Color.dark_grey()
         )
 
-        if channel:
-            await channel.send(embed=success("Session closed. Deleting channel in 5 seconds..."))
+        if channel and archive_thread and not channel.archived:
+            await channel.send(embed=success("Session closed. Archiving thread in 5 seconds..."))
             await asyncio.sleep(5)
             try:
-                await channel.delete(reason=f"Mod mail session closed by {closed_by}")
+                await channel.edit(archived=True, locked=True, reason=f"Mod mail session closed by {closed_by}")
             except discord.NotFound:
                 pass
 

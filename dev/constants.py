@@ -61,6 +61,7 @@ challenge_logs_public_channel_id = 1524679248219213864
 bait_channel_id = 1520372693294125167
 introduction_channel_id = 1520372692090359897
 join_a_team_channel_id = 1520372692446871665
+mod_mail_thread_channel_id = 1546921962339835914
 
 # Marketplace channels
 job_board_channel_id = 1520372693067632693
@@ -192,6 +193,9 @@ verified_emoji_id = 610713784268357632
 upvote_emoji_id = 741202481090002994
 staff_application_emoji_id = 1485325243043283075
 info_emoji_id = 1546914814796763166
+
+# mod_mail_emoji_id = 1546903141671239680
+# bug_emoji_id = 1546906168742518854
 
 # Auto mod rulesets
 racial_and_transphobic_rule_id = 1461221874540347577
