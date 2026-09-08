@@ -210,7 +210,6 @@ bug_emoji_id = 1546914117002993714
 verified_emoji_id = 610713784268357632
 upvote_emoji_id = 741202481090002994
 staff_application_emoji_id = 1485325243043283075
-info_emoji_id = 1546914206228553729
 
 # Challenge system
 challenge_supported_languages = (
@@ -318,6 +317,7 @@ git_fork_emoji = "<:git_fork:758616130780004362>"
 git_commit_emoji = "<:git_commit:758616123590574090>"
 git_repo_emoji = "<:repo:758616137977561119>"
 success_emoji = "<:success:1522613769094693048>"
+info_emoji = "<:info:1546914206228553729>"
 failure_emoji = "<:failure:1522613811033538681>"
 warning_low_emoji = "<:warninglow:1524707529416769596>"
 warning_high_emoji = "<:warninghigh:1524707516636991528>"

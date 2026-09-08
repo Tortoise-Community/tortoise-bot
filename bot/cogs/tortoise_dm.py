@@ -1,7 +1,6 @@
 import asyncio
 import datetime
 import logging
-from io import StringIO
 from typing import Union
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -15,8 +14,7 @@ from bot.constants import (mod_mail_emoji_id, event_emoji_id, staff_application_
                            code_submissions_log_channel_id, default_color, mod_mail_thread_channel_id)
 from bot.utils.checks import check_if_tortoise_staff
 from bot.utils.cooldown import CoolDown
-from bot.utils.embed_handler import authored, failure, success, info, warning
-
+from bot.utils.embed_handler import authored, failure, success, info, warning, info_sm
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +115,7 @@ class ModMailCloseReasonModal(discord.ui.Modal, title="Close Mod Mail with Respo
 
         if channel:
             try:
-                await interaction.followup.send("Closing modmail...", ephemeral=True)
+                await interaction.followup.send(embed=info_sm("Closing modmail..."), ephemeral=True)
             except discord.HTTPException:
                 pass
 
@@ -628,9 +626,22 @@ class TortoiseDM(commands.Cog):
             color=discord.Color.dark_grey()
         )
 
-        if channel and archive_thread and not channel.archived:
-            await channel.send(embed=success("Session closed. Archiving thread in 5 seconds..."))
-            await asyncio.sleep(5)
+        if channel:
+            close_text = f"Session closed by {closed_by}."
+            if reason:
+                close_text += f"\n\n**Reason:** {reason}"
+
+            if channel.archived:
+                try:
+                    await channel.edit(archived=False)
+                except discord.HTTPException:
+                    pass
+
+            await channel.send(embed=success(close_text))
+
+            if archive_thread:
+                await asyncio.sleep(5)
+
             try:
                 await channel.edit(archived=True, locked=True, reason=f"Mod mail session closed by {closed_by}")
             except discord.NotFound:

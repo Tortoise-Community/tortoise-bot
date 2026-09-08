@@ -192,7 +192,6 @@ bug_emoji_id = 1546914803988177077
 verified_emoji_id = 610713784268357632
 upvote_emoji_id = 741202481090002994
 staff_application_emoji_id = 1485325243043283075
-info_emoji_id = 1546914814796763166
 
 # mod_mail_emoji_id = 1546903141671239680
 # bug_emoji_id = 1546906168742518854
@@ -228,6 +227,7 @@ git_fork_emoji = "<:git_fork:758616130780004362>"
 git_commit_emoji = "<:git_commit:758616123590574090>"
 git_repo_emoji = "<:repo:758616137977561119>"
 success_emoji = "<:success:1524706961172463646>"
+info_emoji = "<:info:1546914814796763166>"
 failure_emoji = "<:failure:1524706674550767706>"
 warning_low_emoji = "<:warninglow:1524706548301959199>"
 warning_high_emoji = "<:warninghigh:1524706535073120297>"
