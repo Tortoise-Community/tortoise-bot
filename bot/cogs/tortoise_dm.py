@@ -111,13 +111,15 @@ class ModMailCloseReasonModal(discord.ui.Modal, title="Close Mod Mail with Respo
 
         channel = interaction.guild.get_thread(channel_id)
         await interaction.response.defer(ephemeral=True)
-        await self.cog.close_mod_mail(user_id, channel, closed_by=mod, reason=staff_response, archive_thread=True)
 
         if channel:
             try:
                 await interaction.followup.send(embed=info_sm("Closing modmail..."), ephemeral=True)
             except discord.HTTPException:
                 pass
+
+        await self.cog.close_mod_mail(user_id, channel, closed_by=mod, reason=staff_response, archive_thread=True)
+
 
 
 class ModMailReasonModal(discord.ui.Modal, title="Contact Staff (Mod Mail)"):
@@ -379,6 +381,7 @@ class TortoiseDM(commands.Cog):
         self.active_event_submissions = set()
         self.active_bug_reports = set()
         self.active_staff_applications = set()
+        self._typing_active = set()
 
         # Keys are custom emoji IDs, sub-dict message is the message appearing in the bot DM,
         # callable is the method to call when that option is selected and check is callable that returns
@@ -552,7 +555,53 @@ class TortoiseDM(commands.Cog):
         if after.parent_id == mod_mail_thread_channel_id and not before.archived and after.archived:
             if after.id in self.active_mod_mail_channels:
                 user_id = self.active_mod_mail_channels[after.id]
-                await self.close_mod_mail(user_id, after, closed_by="Thread Archived", archive_thread=False)
+
+                closed_by = "Staff"
+                try:
+                    async for entry in after.guild.audit_logs(action=discord.AuditLogAction.thread_update, limit=3):
+                        if entry.target.id == after.id and getattr(entry.after, "archived", False):
+                            closed_by = entry.user
+                            break
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
+
+                await self.close_mod_mail(user_id, after, closed_by=closed_by, archive_thread=False)
+
+    @commands.Cog.listener()
+    async def on_typing(self, channel, user, when):
+        if user == self.bot.user:
+            return
+
+        if isinstance(channel, discord.DMChannel):
+            if user.id in self.active_mod_mails and user.id not in self._typing_active:
+                self._typing_active.add(user.id)
+
+                thread_id = self.active_mod_mails[user.id]
+                thread = self.bot.get_channel(thread_id)
+
+                if thread:
+                    async with thread.typing():
+                        pass
+
+                self._typing_active.remove(user.id)
+
+        elif isinstance(channel, discord.Thread):
+            if channel.id in self.active_mod_mail_channels and channel.id not in self._typing_active:
+                self._typing_active.add(channel.id)
+
+                user_id = self.active_mod_mail_channels[channel.id]
+                target_user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+
+                if target_user:
+                    try:
+                        if not target_user.dm_channel:
+                            await target_user.create_dm()
+                        async with target_user.dm_channel.typing():
+                            pass
+                    except discord.Forbidden:
+                        pass
+
+                self._typing_active.remove(channel.id)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -630,12 +679,6 @@ class TortoiseDM(commands.Cog):
             close_text = f"Session closed by {closed_by}."
             if reason:
                 close_text += f"\n\n**Reason:** {reason}"
-
-            if channel.archived:
-                try:
-                    await channel.edit(archived=False)
-                except discord.HTTPException:
-                    pass
 
             await channel.send(embed=success(close_text))
 
