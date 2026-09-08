@@ -203,12 +203,13 @@ automatically_assigned_roles = {
 
 
 # Emoji IDs
-mod_mail_emoji_id = 706195614857297970
+mod_mail_emoji_id = 1546914153741156372
 event_emoji_id = 611403448750964746
-bug_emoji_id = 723274927968354364
+bug_emoji_id = 1546914117002993714
 verified_emoji_id = 610713784268357632
 upvote_emoji_id = 741202481090002994
 staff_application_emoji_id = 1485325243043283075
+info_emoji_id = 1546914206228553729
 
 # Challenge system
 challenge_supported_languages = (

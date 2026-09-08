@@ -1,20 +1,21 @@
+import asyncio
 import datetime
 import logging
 from io import StringIO
 from typing import Union
-from asyncio import TimeoutError
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import discord
-from discord.abc import Messageable
 from discord.ext import commands, tasks
 from discord import app_commands
 
-from bot import constants
+from bot.constants import (mod_mail_emoji_id, event_emoji_id, staff_application_emoji_id, bug_emoji_id,
+                           ban_appeal_server_id, tortoise_guild_id, admin_role_id, mod_mail_ping_role_id,
+                           moderator_role_id, jr_moderator_role_id, staff_channel_id, bot_log_channel_id,
+                           mod_mail_log_channel_id, code_submissions_log_channel_id, default_color)
 from bot.utils.checks import check_if_tortoise_staff
 from bot.utils.cooldown import CoolDown
-from bot.utils.message_logger import MessageLogger
-from bot.utils.embed_handler import authored, failure, success, info
+from bot.utils.embed_handler import authored, failure, success, info, warning
 
 
 logger = logging.getLogger(__name__)
@@ -49,9 +50,7 @@ class StaffApplicationModal(discord.ui.Modal, title="Staff Application"):
     )
     reason_input = discord.ui.Label(
         text="Tell us about yourself.",
-        description=(
-            "Why are you a good fit, any prior experience?"
-        ),
+        description="Why are you a good fit, any prior experience?",
         component=discord.ui.TextInput(
             style=discord.TextStyle.long,
             min_length=10,
@@ -97,73 +96,36 @@ class ModMailCloseReasonModal(discord.ui.Modal, title="Close Mod Mail with Respo
         required=True
     )
 
-    def __init__(self, cog: "TortoiseDM", user_id: int, staff_msg: discord.Message):
+    def __init__(self, cog: "TortoiseDM", user_id: int):
         super().__init__()
         self.cog = cog
         self.user_id = user_id
-        self.staff_msg = staff_msg
 
     async def on_submit(self, interaction: discord.Interaction):
         mod = interaction.user
         user_id = self.user_id
         staff_response = self.response_input.value
 
-        if user_id not in self.cog.pending_mod_mails:
-            await interaction.response.send_message("This mod mail is no longer pending.", ephemeral=True)
+        channel_id = self.cog.active_mod_mails.get(user_id)
+        if not channel_id:
+            await interaction.response.send_message("This mod mail is no longer active.", ephemeral=True)
             return
 
+        channel = interaction.guild.get_channel(channel_id)
         await interaction.response.defer(ephemeral=True)
+        await self.cog.close_mod_mail(user_id, channel, closed_by=mod, reason=staff_response)
 
-        user = self.cog.bot.get_user(user_id)
-
-        if user:
+        if channel:
             try:
-                dm_embed = info(
-                    f"Your mod mail thread has been marked as completed by staff.\n\n"
-                    f"**Staff Response:**\n{staff_response}\n\n"
-                    f"-# If you are not satisfied with the response, Please initiate a new mod mail.\n",
-                    self.cog.bot.user,
-                    "Mod Mail Closed"
-                )
-                dm_embed.set_footer(text="Tortoise Programming Community")
-                await user.send(embed=dm_embed)
+                await interaction.followup.send("Closing modmail...", ephemeral=True)
             except discord.HTTPException:
                 pass
-
-        from bot.utils.message_logger import MessageLogger
-        from io import StringIO
-
-        log = MessageLogger(mod.id, user_id)
-        log.add_embed(
-            info(f"Mod Mail closed via dynamic staff action.\n"
-                 f"Staff Response: {staff_response}", mod, "Direct Closure"))
-
-        logs = await self.cog.mod_mail_report_channel.send(
-            file=discord.File(StringIO(str(log)), filename=f"closed_with_response_{user_id}.txt")
-        )
-
-        self.cog.pending_mod_mails.remove(user_id)
-        if user_id in self.cog.modmail_messages:
-            del self.cog.modmail_messages[user_id]
-
-        self.clear_items()
-
-        await self.cog.update_staff_embed_from_message(
-            self.staff_msg,
-            description=f"{logs.jump_url}",
-            footer_append=f"☑️ Accepted by {mod}\n\n🔒 Resolved with response.",
-            color=discord.Color.dark_grey(),
-        )
-
-        await interaction.followup.send(embed=success("Closed and response sent successfully."), ephemeral=True)
 
 
 class ModMailReasonModal(discord.ui.Modal, title="Contact Staff (Mod Mail)"):
     reason = discord.ui.Label(
         text="Reason for contacting staff",
-        description=(
-            "⚠️ Mod mail is strictly for reporting scams, bots or server related issues."
-        ),
+        description="⚠️ Mod mail is strictly for reporting scams, bots or server related issues.",
         component=discord.ui.TextInput(
             style=discord.TextStyle.long,
             min_length=10,
@@ -214,9 +176,7 @@ class DutyScheduleModal(discord.ui.Modal, title="Set Daily Mod Mail Schedule"):
             await interaction.response.send_message(embed=failure("Invalid time format. Use HH:MM."), ephemeral=True)
             return
         except ZoneInfoNotFoundError:
-            await interaction.response.send_message(embed=failure(
-                "Invalid timezone. Example: 'UTC' or 'Europe/London'."
-            ), ephemeral=True)
+            await interaction.response.send_message(embed=failure("Invalid timezone."), ephemeral=True)
             return
 
         await self.cog.duty_manager.set_schedule(
@@ -229,9 +189,8 @@ class DutyScheduleModal(discord.ui.Modal, title="Set Daily Mod Mail Schedule"):
 
         await interaction.response.send_message(
             embed=success(
-                f"You'll receive the pings daily between "
-                f"{self.start_time.value} and {self.end_time.value} ({tz_str})."
-            ), ephemeral=True
+                f"Ping scheduled daily between {self.start_time.value} and {self.end_time.value} ({tz_str})."),
+            ephemeral=True
         )
 
 
@@ -245,7 +204,7 @@ class DMInitView(discord.ui.View):
             if not sub_dict["check"]():
                 continue
 
-            emoji = cog.bot.get_emoji(emoji_id)
+            emoji = cog.bot.app_emojis.get(emoji_id)
             if emoji is None:
                 continue
 
@@ -312,26 +271,14 @@ class ModMailAcceptView(discord.ui.View):
         self.cog = cog
         self.user_id = user_id
 
-    async def safe_send(
-            self,
-            target: Messageable,
-            *args,
-            **kwargs
-    ) -> bool:
-        try:
-            await target.send(*args, **kwargs)
-            return True
-        except (discord.Forbidden, discord.HTTPException):
-            return False
-
     def permission_check(self, mod: discord.Member) -> bool:
         return any(role in mod.roles for role in (
-                self.cog.admin_role,
-                self.cog.moderator_role,
-                self.cog.jr_moderator_role
+            self.cog.admin_role,
+            self.cog.moderator_role,
+            self.cog.jr_moderator_role
         ))
 
-    @discord.ui.button(label="Accept Mod Mail", style=discord.ButtonStyle.green)
+    @discord.ui.button(label="Accept Mod Mail", style=discord.ButtonStyle.green, custom_id="accept_modmail_btn")
     async def accept(self, interaction: discord.Interaction, button: discord.ui.Button):
         mod = interaction.user
         user_id = self.user_id
@@ -341,172 +288,82 @@ class ModMailAcceptView(discord.ui.View):
             return
 
         if user_id not in self.cog.pending_mod_mails:
-            await interaction.response.send_message("Mod mail no longer pending.", ephemeral=True)
+            await interaction.response.send_message("Mod mail is no longer pending.", ephemeral=True)
             return
 
-        user = self.cog.bot.get_user(user_id)
+        user = self.cog.bot.get_user(user_id) or await self.cog.bot.fetch_user(user_id)
         if user is None:
             await interaction.response.send_message("User not found.", ephemeral=True)
             return
 
         await interaction.response.defer(ephemeral=True)
 
+        category = self.cog.staff_channel.category
+        overwrites = {
+            interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False),
+            self.cog.bot.user: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            self.cog.admin_role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            self.cog.moderator_role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+            self.cog.jr_moderator_role: discord.PermissionOverwrite(read_messages=True, send_messages=True),
+        }
+
+        channel_name = f"modmail-{user.name}"
+        channel = await interaction.guild.create_text_channel(
+            name=channel_name,
+            category=category,
+            overwrites=overwrites,
+            topic=f"Mod Mail session for {user} (ID: {user.id})"
+        )
+
+        self.cog.active_mod_mails[user_id] = channel.id
+        self.cog.active_mod_mail_channels[channel.id] = user_id
+        self.cog.pending_mod_mails.remove(user_id)
+
+        await self.cog.bot.modmail_manager.create_session(user_id, channel.id, interaction.message.id)
+
+        embed = success(
+            f"{mod.mention} accepted the mod mail for `{user}` (ID: {user.id}).\n\n"
+            "Type `close` to resolve and delete this channel, or use the Resolve button below."
+        )
+
+        view = discord.ui.View(timeout=None)
+        view.add_item(discord.ui.Button(label="Resolve with Reason", style=discord.ButtonStyle.blurple,
+                                        custom_id=f"resolve_{user_id}"))
+
+        await channel.send(content=f"{mod.mention}", embed=embed, view=view)
+
+        user_embed = authored(
+            f"{mod.display_name} has joined the chat and will be helping you.\n"
+            "Reply here to send messages directly to the staff team.",
+            author=mod
+        )
+
+        try:
+            await user.send(embed=user_embed)
+        except discord.Forbidden:
+            await channel.send(embed=warning("The user has their DMs closed or blocked the bot."))
+
         self.clear_items()
         await self.cog.update_staff_embed_from_message(
             interaction.message,
             footer_append=f"☑️ Accepted by {mod.name}",
             color=discord.Color.green(),
-            view=self
+            view=self,
+            description=f"Ticket opened in {channel.mention}"
         )
+        await interaction.followup.send(embed=success(f"Created ticket in {channel.mention}"), ephemeral=True)
 
-        if not await self.safe_send(
-                mod,
-                embed=success(
-                    f"You have accepted `{user}` mod mail request.\n"
-                    "Reply here in DMs to chat with them.\n"
-                    "This mod mail will be logged.\n"
-                    "Type `close` to close this mod mail."
-                )):
-            await interaction.followup.send("Mod mail failed: moderator DMs closed.", ephemeral=True)
-            return
-
-        if not await self.safe_send(user, embed=authored((
-                f"{mod.name} has accepted your mod mail request.\n"
-                "Reply here in DMs to chat with them.\n"
-                "This mod mail will be logged, by continuing you agree to that."
-        ), author=mod
-        )):
-            await interaction.followup.send("Failed to notify the user. Their DMs might be closed.", ephemeral=True)
-            return
-
-        self.cog.pending_mod_mails.remove(user_id)
-        self.cog.active_mod_mails[user_id] = mod.id
-        embed = success("Mod Mail initialized. Check your DMs")
-        await interaction.followup.send(embed=embed, ephemeral=True)
-
-        first_timeout = 21_600
-        regular_timeout = 1800
-        first_timeout_flag = False
-        _timeout = first_timeout
-
-        log = MessageLogger(mod.id, user.id)
-
-        def mod_mail_check(msg):
-            return msg.guild is None and msg.author.id in (user_id, mod.id)
-
-        await self.start_main_session(_timeout, first_timeout_flag, log, mod, mod_mail_check, regular_timeout, user,
-                                      user_id)
-
-    async def start_main_session(self, _timeout, first_timeout_flag, log, mod, mod_mail_check, regular_timeout, user,
-                                 user_id):
-        while True:
-            try:
-                mail_msg = await self.cog.bot.wait_for("message", check=mod_mail_check, timeout=_timeout)
-                log.add_message(mail_msg)
-            except TimeoutError:
-                timeout_embed = failure("Mod mail closed due to inactivity.")
-                log.add_embed(timeout_embed)
-
-                await self.safe_send(mod, embed=timeout_embed)
-                await self.safe_send(user, embed=timeout_embed)
-
-                del self.cog.active_mod_mails[user_id]
-                logs = await self.cog.mod_mail_report_channel.send(
-                    file=discord.File(StringIO(str(log)), filename=log.filename)
-                )
-
-                await self.cog.update_staff_embed(
-                    user_id,
-                    description=logs.jump_url,
-                    footer_append="🕑 Closed due to inactivity.",
-                    color=discord.Color.dark_red()
-                )
-
-                del self.cog.modmail_messages[user_id]
-                break
-
-            attachments = self.cog._get_attachments_as_urls(mail_msg)
-            mail_msg.content += attachments
-
-            if len(mail_msg.content) > 1900:
-                mail_msg.content = f"{mail_msg.content[:1900]} ...truncated because it was too long."
-
-            if mail_msg.author == user and not first_timeout_flag:
-                first_timeout_flag = True
-                _timeout = regular_timeout
-
-            if mail_msg.content.lower() == "close" and mail_msg.author.id == mod.id:
-                close_embed = success(f"Mod mail successfully closed by {mail_msg.author}.")
-                log.add_embed(close_embed)
-
-                await self.safe_send(mod, embed=close_embed)
-                await self.safe_send(user, embed=close_embed)
-
-                del self.cog.active_mod_mails[user_id]
-                logs = await self.cog.mod_mail_report_channel.send(
-                    file=discord.File(StringIO(str(log)), filename=log.filename)
-                )
-                await self.cog.update_staff_embed(
-                    user_id,
-                    description=logs.jump_url,
-                    footer_append="✅ Session Completed",
-                    color=discord.Color.dark_grey()
-                )
-                del self.cog.modmail_messages[user_id]
-                break
-
-            if mail_msg.author == user:
-                await self.safe_send(mod, content=mail_msg.content)
-
-            elif mail_msg.author == mod:
-                guild_member = (self.cog.tortoise_guild.get_member(user_id)
-                                or self.cog.ban_appeal_guild.get_member(user_id))
-                if guild_member is None:
-                    left_embed = failure("Mod mail closed: The user has left the server.")
-                    log.add_embed(left_embed)
-
-                    await self.safe_send(mod, embed=left_embed)
-
-                    del self.cog.active_mod_mails[user_id]
-                    logs = await self.cog.mod_mail_report_channel.send(
-                        file=discord.File(StringIO(str(log)), filename=log.filename)
-                    )
-                    await self.cog.update_staff_embed(
-                        user_id,
-                        description=logs.jump_url,
-                        footer_append="❌ Closed: User left the server.",
-                        color=discord.Color.red()
-                    )
-                    del self.cog.modmail_messages[user_id]
-                    break
-
-                if not await self.safe_send(user, embed=mail_msg.content):
-                    dm_closed_embed = failure("Could not deliver message: The user closed their DMs.")
-                    await self.safe_send(mod, embed=dm_closed_embed)
-                    log.add_embed(dm_closed_embed)
-
-    @discord.ui.button(
-        label="Resolve with Reason",
-        style=discord.ButtonStyle.blurple,
-        custom_id="close_modmail_reason_btn"
-    )
-    async def close_with_reason(self, interaction: discord.Interaction, button: discord.ui.Button):
-        mod = interaction.user
-        user_id = self.user_id
-
-        if not any(role in mod.roles for role in (
-                self.cog.admin_role,
-                self.cog.moderator_role,
-                self.cog.jr_moderator_role
-        )):
+    @discord.ui.button(label="Resolve with Reason", style=discord.ButtonStyle.blurple, custom_id="decline_reason_btn")
+    async def decline_with_reason(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not self.permission_check(interaction.user):
             await interaction.response.send_message("No permission.", ephemeral=True)
             return
 
-        if user_id not in self.cog.pending_mod_mails:
-            await interaction.response.send_message("This mod mail request is no longer pending.", ephemeral=True)
+        if self.user_id not in self.cog.pending_mod_mails:
+            await interaction.response.send_message("Request is no longer pending.", ephemeral=True)
             return
 
-        await interaction.response.send_modal(ModMailCloseReasonModal(self.cog, user_id, interaction.message))
+        await interaction.response.send_modal(ModMailCloseReasonModal(self.cog, self.user_id))
 
 
 class TortoiseDM(commands.Cog):
@@ -522,10 +379,10 @@ class TortoiseDM(commands.Cog):
         self._mod_mail_ping_role = None
         self.cool_down = CoolDown(seconds=120)
         self.bot.loop.create_task(self.cool_down.start())
-        self.duty_manager = bot.duty_manager
 
-        # Key is user id value is mod/admin id
-        self.active_mod_mails = {}
+        self.active_mod_mails = {}  # dict[user_id: int] = channel_id: int
+        self.active_mod_mail_channels = {}  # dict[channel_id: int] = user_id: int
+
         self.modmail_messages = {}
         self.pending_mod_mails = set()
         self.active_event_submissions = set()
@@ -537,30 +394,28 @@ class TortoiseDM(commands.Cog):
         # bool whether that option is disabled or not.
         # TODO if callable errors container will not be properly updated so users will not be able to call it again
         self._options = {
-            constants.mod_mail_emoji_id: {
+            mod_mail_emoji_id: {
                 "message": "Contact staff (Mod Mail)",
                 "callable": self.create_mod_mail,
-                "check": lambda: self.bot.tortoise_meta_cache["mod_mail"]
+                "check": lambda: self.bot.tortoise_meta_cache.get("mod_mail", True)
             },
-            constants.event_emoji_id: {
+            event_emoji_id: {
                 "message": "Event submission",
                 "callable": self.create_event_submission,
-                "check": lambda: self.bot.tortoise_meta_cache["event_submission"]
+                "check": lambda: self.bot.tortoise_meta_cache.get("event_submission", False)
             },
-            constants.staff_application_emoji_id: {
+            staff_application_emoji_id: {
                 "message": "Staff Application",
                 "callable": self.create_staff_application,
-                "check": lambda: self.bot.tortoise_meta_cache["staff_application"]
+                "check": lambda: self.bot.tortoise_meta_cache.get("staff_application", False)
             },
-            constants.bug_emoji_id: {
+            bug_emoji_id: {
                 "message": "Bug report",
                 "callable": self.create_bug_report,
-                "check": lambda: self.bot.tortoise_meta_cache["bug_report"]
+                "check": lambda: self.bot.tortoise_meta_cache.get("bug_report", True)
             },
         }
 
-        # User IDs for which the trigger_typing() is active, so we don't spam the method.
-        self._typing_active = set()
         self.bug_report_channel = None
         self.mod_mail_report_channel = None
         self.code_submissions_channel = None
@@ -570,11 +425,21 @@ class TortoiseDM(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         # Server Utility Channels
-        self.staff_channel = self.bot.get_channel(constants.staff_channel_id)
-        self.bug_report_channel = self.bot.get_channel(constants.bot_log_channel_id)
-        self.mod_mail_report_channel = self.bot.get_channel(constants.mod_mail_log_channel_id)
-        self.code_submissions_channel = self.bot.get_channel(constants.code_submissions_log_channel_id)
-        self.staff_applications_channel = self.bot.get_channel(constants.bot_log_channel_id)
+        self.staff_channel = self.bot.get_channel(staff_channel_id)
+        self.bug_report_channel = self.bot.get_channel(bot_log_channel_id)
+        self.mod_mail_report_channel = self.bot.get_channel(mod_mail_log_channel_id)
+        self.code_submissions_channel = self.bot.get_channel(code_submissions_log_channel_id)
+        self.staff_applications_channel = self.bot.get_channel(bot_log_channel_id)
+
+        active_sessions = await self.bot.modmail_manager.get_all_active()
+        for session in active_sessions:
+            user_id = session['user_id']
+            channel_id = session['channel_id']
+            msg_id = session['staff_message_id']
+            self.active_mod_mails[user_id] = channel_id
+            self.active_mod_mail_channels[channel_id] = user_id
+            if msg_id:
+                self.modmail_messages[user_id] = msg_id
 
         if not self.duty_automation_loop.is_running():
             self.duty_automation_loop.start()
@@ -582,37 +447,37 @@ class TortoiseDM(commands.Cog):
     @property
     def tortoise_guild(self):
         if self._tortoise_guild is None:
-            self._tortoise_guild = self.bot.get_guild(constants.tortoise_guild_id)
+            self._tortoise_guild = self.bot.get_guild(tortoise_guild_id)
         return self._tortoise_guild
 
     @property
     def ban_appeal_guild(self):
         if self._ban_appeal_guild is None:
-            self._ban_appeal_guild = self.bot.get_guild(constants.ban_appeal_server_id)
+            self._ban_appeal_guild = self.bot.get_guild(ban_appeal_server_id)
         return self._ban_appeal_guild
 
     @property
     def admin_role(self):
         if self._admin_role is None:
-            self._admin_role = self.tortoise_guild.get_role(constants.admin_role_id)
+            self._admin_role = self.tortoise_guild.get_role(admin_role_id)
         return self._admin_role
 
     @property
     def moderator_role(self):
         if self._moderator_role is None:
-            self._moderator_role = self.tortoise_guild.get_role(constants.moderator_role_id)
+            self._moderator_role = self.tortoise_guild.get_role(moderator_role_id)
         return self._moderator_role
 
     @property
     def jr_moderator_role(self):
         if self._jr_moderator_role is None:
-            self._jr_moderator_role = self.tortoise_guild.get_role(constants.jr_moderator_role_id)
+            self._jr_moderator_role = self.tortoise_guild.get_role(jr_moderator_role_id)
         return self._jr_moderator_role
 
     @property
     def mod_mail_ping_role(self):
         if self._mod_mail_ping_role is None:
-            self._mod_mail_ping_role = self.tortoise_guild.get_role(constants.mod_mail_ping_role_id)
+            self._mod_mail_ping_role = self.tortoise_guild.get_role(mod_mail_ping_role_id)
         return self._mod_mail_ping_role
 
     @tasks.loop(minutes=5)
@@ -620,7 +485,7 @@ class TortoiseDM(commands.Cog):
         """Background task running every minute to check schedules."""
         await self.bot.wait_until_ready()
         try:
-            schedules = await self.duty_manager.get_all_schedules()
+            schedules = await self.bot.duty_manager.get_all_schedules()
             now_utc = datetime.datetime.now(datetime.timezone.utc)
 
             for record in schedules:
@@ -655,56 +520,148 @@ class TortoiseDM(commands.Cog):
         except Exception as e:
             logger.error(f"Error in duty loop: {e}")
 
+    @classmethod
+    def _build_embeds(cls, message: discord.Message, base_embed: discord.Embed) -> list[discord.Embed]:
+        image_attachments = [
+            att for att in message.attachments
+            if att.content_type and att.content_type.startswith("image/")
+        ]
+        non_image_attachments = [
+            att for att in message.attachments
+            if att not in image_attachments
+        ]
+
+        if non_image_attachments:
+            links = "\n".join(f"[{att.filename}]({att.url})" for att in non_image_attachments)
+            base_embed.description = (
+                f"{base_embed.description or ''}\n\n**Attachments:**\n{links}"
+            ).strip()
+
+        if not image_attachments:
+            return [base_embed]
+
+        embeds = []
+        base_embed.set_image(url=image_attachments[0].url)
+        embeds.append(base_embed)
+
+        for att in image_attachments[1:10]:
+            img_embed = discord.Embed(color=default_color)
+            img_embed.set_image(url=att.url)
+            embeds.append(img_embed)
+
+        return embeds
+
     @commands.Cog.listener()
-    async def on_message(self, message):
+    async def on_interaction(self, interaction: discord.Interaction):
+        if interaction.type == discord.InteractionType.component and interaction.data.get('custom_id', '').startswith(
+                'resolve_'):
+            user_id = int(interaction.data['custom_id'].split('_')[1])
+            await interaction.response.send_modal(ModMailCloseReasonModal(self, user_id))
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
         if message.author == self.bot.user:
             return
-        elif message.guild is not None:
-            return  # Functionality only active in DMs
-        if self.is_any_session_active(message.author.id):
-            return
-        else:
-            await self.send_dm_options(output=message.author)
 
-    @commands.Cog.listener()
-    async def on_typing(self, channel, user, _when):
-        if not isinstance(channel, discord.DMChannel):
-            return
-        elif not self.is_any_session_active(user.id):
-            return
-        elif user.id in self._typing_active:
+        if message.guild is None:
+            if message.author.id in self.active_mod_mails:
+                channel_id = self.active_mod_mails[message.author.id]
+                channel = self.bot.get_channel(channel_id)
+
+                if channel:
+                    embed = discord.Embed(description=message.content, color=default_color)
+                    embed.set_author(name=f"{message.author.name} (User)", icon_url=message.author.display_avatar.url)
+                    embeds = self._build_embeds(message, embed)
+
+                    await channel.send(embeds=embeds)
+                return
+            elif not self.is_any_session_active(message.author.id):
+                await self.send_dm_options(output=message.author)
             return
 
-        destination_id = self.active_mod_mails.get(user.id)
-        if destination_id is None:
-            # If it's None there is no user with that ID that has opened mod mail request.
-            # However, we can still have the mod/admin that could be attending mod mail
-            destination_id = self._get_dict_key_by_value(user.id)
+        if message.channel.id in self.active_mod_mail_channels:
+            user_id = self.active_mod_mail_channels[message.channel.id]
 
-            if destination_id is None:
-                # If it's again None then there is no such ID in either user nor mods/admins
+            if message.content.lower() == "close":
+                await self.close_mod_mail(user_id, message.channel, closed_by=message.author)
                 return
 
-        self._typing_active.add(user.id)
+            user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
+            if user:
+                embed = discord.Embed(description=message.content, color=default_color)
+                embed.set_author(name=f"{message.author.display_name}",
+                                 icon_url=message.author.display_avatar.url)
+                embeds = self._build_embeds(message, embed)
 
-        destination_user = self.bot.get_user(destination_id)
+                try:
+                    await user.send(embeds=embeds)
+                except discord.Forbidden:
+                    await message.channel.send(embed=failure("Could not deliver message: The user closed their DMs."))
+            else:
+                await message.channel.send(embed=failure("User not found, they may have left Discord."))
 
-        if destination_user is None:
-            destination_user = await self.bot.fetch_user(destination_id)
+    async def close_mod_mail(self, user_id: int, channel: discord.TextChannel, closed_by: discord.Member,
+                             reason: str = None):
+        user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
 
-        dm = destination_user.dm_channel
+        if user:
+            try:
+                msg = "Your mod mail thread has been marked as completed by staff."
+                if reason:
+                    msg += f"\n\n**Staff Response:**\n{reason}"
+                msg += "\n\n-# If you are not satisfied with the response, please initiate a new mod mail."
 
-        if dm is None:
-            dm = await destination_user.create_dm()
-        # Per docs: Active for 10s or until first message
-        async with dm.typing():
-            pass
-        self._typing_active.remove(user.id)
+                dm_embed = info(msg, self.bot.user, "Mod Mail Closed")
+                dm_embed.set_footer(text="Tortoise Programming Community")
+                await user.send(embed=dm_embed)
+            except discord.HTTPException:
+                pass
 
-    def _get_dict_key_by_value(self, value: int) -> int:
-        for key, v in self.active_mod_mails.items():
-            if v == value:
-                return key
+        log_content = []
+        if channel:
+            async for msg in channel.history(limit=None, oldest_first=True):
+                time_str = msg.created_at.strftime('%Y-%m-%d %H:%M:%S')
+                if msg.author == self.bot.user and msg.embeds:
+                    embed = msg.embeds[0]
+                    author = embed.author.name if embed.author else "System/Bot"
+                    desc = embed.description or ""
+                    log_content.append(f"[{time_str}] {author}: {desc}")
+                else:
+                    log_content.append(f"[{time_str}] {msg.author.name}: {msg.content}")
+
+        transcript_str = "\n".join(log_content)
+        logs = None
+
+        if transcript_str:
+            file = discord.File(StringIO(transcript_str), filename=f"modmail_transcript_{user_id}.txt")
+            close_info = f"Mod Mail closed by {closed_by}." + (f" Reason: {reason}" if reason else "")
+            logs = await self.mod_mail_report_channel.send(content=close_info, file=file)
+
+        if user_id in self.active_mod_mails:
+            del self.active_mod_mails[user_id]
+        if channel and channel.id in self.active_mod_mail_channels:
+            del self.active_mod_mail_channels[channel.id]
+
+        if user_id in self.pending_mod_mails:
+            self.pending_mod_mails.remove(user_id)
+
+        await self.bot.modmail_manager.close_session(user_id)
+
+        url = logs.jump_url if logs else "Transcript missing"
+        await self.update_staff_embed(
+            user_id,
+            description=url,
+            footer_append=f"🔒 Resolved by {closed_by}",
+            color=discord.Color.dark_grey()
+        )
+
+        if channel:
+            await channel.send(embed=success("Session closed. Deleting channel in 5 seconds..."))
+            await asyncio.sleep(5)
+            try:
+                await channel.delete(reason=f"Mod mail session closed by {closed_by}")
+            except discord.NotFound:
+                pass
 
     async def send_dm_options(self, *, output):
         if not any(sub_dict["check"]() for sub_dict in self._options.values()):
@@ -720,7 +677,6 @@ class TortoiseDM(commands.Cog):
         return any(
             user_id in active for active in (
                 self.active_mod_mails.keys(),
-                self.active_mod_mails.values(),
                 self.active_event_submissions,
                 self.active_bug_reports,
                 self.active_staff_applications,
@@ -758,6 +714,9 @@ class TortoiseDM(commands.Cog):
             color=None,
             view=None
     ):
+
+        if not message.embeds: return
+
         embed = message.embeds[0]
 
         embed = self._apply_staff_embed_updates(
@@ -794,20 +753,19 @@ class TortoiseDM(commands.Cog):
         except Exception:
             pass
 
-    async def create_mod_mail(self, user: discord.User, reason: str = "No reason provided.",
-                              source: str = "dm", ping=True):
-        if user.id in self.pending_mod_mails:
+        if color == discord.Color.dark_grey() and user_id in self.modmail_messages:
+            del self.modmail_messages[user_id]
+
+    async def create_mod_mail(self, user: discord.User, reason: str = "No reason provided.", source: str = "dm",
+                              ping=True):
+        if user.id in self.pending_mod_mails or user.id in self.active_mod_mails:
             try:
-                await user.send(embed=failure("You already have a pending mod mail, please be patient."))
+                await user.send(embed=failure("You already have an active mod mail, please be patient."))
             except discord.Forbidden:
                 pass
             return
 
-        source_text = {
-            "dm": "submitted for mod mail.",
-            "panel": "created a ban appeal request."
-        }.get(source, source)
-
+        source_text = "submitted for mod mail." if source == "dm" else source
         submission_embed = authored(f"{user.name} {source_text}", author=user)
         submission_embed.add_field(name="Provided Reason", value=reason, inline=False)
         submission_embed.color = discord.Color.orange()
@@ -887,31 +845,18 @@ class TortoiseDM(commands.Cog):
             container.remove(user.id)
             await user.send(embed=failure("Too short - seems invalid, canceling."))
             return None
-        else:
-            return user_reply_content
+        return user_reply_content
 
-    async def _wait_for(self, container: set, user: discord.User,
-                        sub_type: str, sub_format=None) -> Union[discord.Message, None]:
-        """
-        Simple custom wait_for that waits for user reply for 5 minutes and has ability to cancel the wait,
-        deal with errors and deal with containers (which mark users that are currently doing something aka
-        event submission/bug report etc).
-        :param container: set, container holding active user sessions by having their IDs in it.
-        :param user: Discord user to wait reply from
-        :return: Union[Message, None] message representing user reply, can be none representing invalid reply.
-        """
+    async def _wait_for(self, container: set, user: discord.User, sub_type: str, sub_format=None) -> Union[
+        discord.Message, None]:
         def check(msg):
             return msg.guild is None and msg.author == user
 
         container.add(user.id)
-
-        if sub_format is not None:
-            sub_format = "\n" + sub_format
+        if sub_format is not None: sub_format = "\n" + sub_format
 
         await user.send(embed=info(
-            f"Reply with single message or link to paste service or upload a `.txt` file.\n"
-            f"Type `cancel` to cancel right away. "
-            f"\n\n{'**Format: **' + sub_format if sub_format else ''}",
+            f"Reply with single message or link to paste service or upload a `.txt` file.\nType `cancel` to cancel right away.\n\n{'**Format: **' + sub_format if sub_format else ''}",
             user, sub_type + " Initialized", "This submission will timeout in 5 minutes.")
         )
 

@@ -17,7 +17,7 @@ from bot.api_client import TortoiseAPI
 from bot.constants import bot_log_channel_id, github_repo_link
 from bot.manager import (
     Database, ProgressionManager, AFKManager, PointsManager, ChallengeManager,
-    RetentionManager, TeamManager, GiveawayManager, DutyManager
+    RetentionManager, TeamManager, GiveawayManager, DutyManager, ModMailManager
 )
 from bot.utils.embed_handler import simple_embed
 from bot.utils.error_handler import TortoiseCommandTree
@@ -45,6 +45,7 @@ class Bot(commands.Bot):
     }
     build_version = "mystery-build"
     advanced_protection: bool = True
+    app_emojis = {}
 
     def __init__(self, prefix="t.", *args, **kwargs):
         intents = discord.Intents.default()
@@ -81,6 +82,7 @@ class Bot(commands.Bot):
         self.team_manager = None
         self.giveaway_manager = None
         self.duty_manager = None
+        self.modmail_manager = None
         self._sys_log_channel = None
 
         if DEVELOPMENT_MODE:
@@ -167,6 +169,10 @@ class Bot(commands.Bot):
 
         self.db = Database(DB_URL)
 
+        emojis = await self.fetch_application_emojis()
+        for emoji in emojis:
+            self.app_emojis[emoji.id] = emoji
+
         if not config("DISABLE_DB", cast=bool, default=False):
             await self.db.connect()
 
@@ -178,6 +184,7 @@ class Bot(commands.Bot):
             self.team_manager = TeamManager(self.db)
             self.giveaway_manager = GiveawayManager(self.db)
             self.duty_manager = DutyManager(self.db)
+            self.modmail_manager = ModMailManager(self.db)
 
             await self.progression_manager.setup()
             await self.afk_manager.setup()
@@ -187,6 +194,7 @@ class Bot(commands.Bot):
             await self.team_manager.setup()
             await self.giveaway_manager.setup()
             await self.duty_manager.setup()
+            await self.modmail_manager.setup()
 
         await self.load_extensions()
         # await self.reload_tortoise_meta_cache()

@@ -1272,3 +1272,45 @@ class DutyManager:
 
     async def get_all_schedules(self):
         return await self.db.pool.fetch("SELECT * FROM duty_schedules")
+
+
+class ModMailManager:
+    def __init__(self, db: Database):
+        self.db = db
+
+    async def setup(self):
+        await self.db.pool.execute(
+            """
+            CREATE TABLE IF NOT EXISTS modmail_sessions (
+                user_id BIGINT PRIMARY KEY,
+                channel_id BIGINT NOT NULL,
+                staff_message_id BIGINT,
+                status TEXT DEFAULT 'open',
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """
+        )
+
+    async def create_session(self, user_id: int, channel_id: int, staff_message_id: int):
+        await self.db.pool.execute(
+            """
+            INSERT INTO modmail_sessions (user_id, channel_id, staff_message_id, status)
+            VALUES ($1, $2, $3, 'open')
+            ON CONFLICT (user_id) DO UPDATE SET
+                channel_id = EXCLUDED.channel_id,
+                staff_message_id = EXCLUDED.staff_message_id,
+                status = 'open'
+            """,
+            user_id, channel_id, staff_message_id
+        )
+
+    async def get_all_active(self):
+        return await self.db.pool.fetch(
+            "SELECT * FROM modmail_sessions WHERE status='open'"
+        )
+
+    async def close_session(self, user_id: int):
+        await self.db.pool.execute(
+            "UPDATE modmail_sessions SET status='closed' WHERE user_id=$1",
+            user_id
+        )

@@ -185,12 +185,13 @@ automatically_assigned_roles = {
 
 
 # Emoji IDs
-mod_mail_emoji_id = 1529488959665733662
+mod_mail_emoji_id = 1546914838733791362
 event_emoji_id = 611403448750964746
-bug_emoji_id = 1529489689222840673
+bug_emoji_id = 1546914803988177077
 verified_emoji_id = 610713784268357632
 upvote_emoji_id = 741202481090002994
 staff_application_emoji_id = 1485325243043283075
+info_emoji_id = 1546914814796763166
 
 # Auto mod rulesets
 racial_and_transphobic_rule_id = 1461221874540347577
