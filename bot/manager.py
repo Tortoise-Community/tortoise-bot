@@ -1304,6 +1304,12 @@ class ModMailManager:
             user_id, channel_id, staff_message_id
         )
 
+    async def get_user_thread(self, user_id: int):
+        return await self.db.pool.fetchval(
+            "SELECT channel_id FROM modmail_sessions WHERE user_id=$1",
+            user_id
+        )
+
     async def get_all_active(self):
         return await self.db.pool.fetch(
             "SELECT * FROM modmail_sessions WHERE status='open'"
@@ -1313,4 +1319,14 @@ class ModMailManager:
         await self.db.pool.execute(
             "UPDATE modmail_sessions SET status='closed' WHERE user_id=$1",
             user_id
+        )
+
+    async def get_session_by_channel(self, channel_id: int):
+        return await self.db.pool.fetchrow(
+            "SELECT * FROM modmail_sessions WHERE channel_id=$1", channel_id
+        )
+
+    async def reopen_session(self, user_id: int):
+        await self.db.pool.execute(
+            "UPDATE modmail_sessions SET status='open' WHERE user_id=$1", user_id
         )

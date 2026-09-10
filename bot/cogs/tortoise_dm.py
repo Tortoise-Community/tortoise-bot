@@ -27,6 +27,88 @@ class UnsupportedFileEncoding(ValueError):
     pass
 
 
+class ReverseReopenReasonModal(discord.ui.Modal, title="Reopen Mod Mail"):
+    reason_input = discord.ui.TextInput(
+        label="Reason for reopening",
+        style=discord.TextStyle.long,
+        placeholder="e.g. We need more information regarding your report...",
+        required=True
+    )
+
+    def __init__(self, cog, user_id: int, prompt_message: discord.Message):
+        super().__init__()
+        self.cog = cog
+        self.user_id = user_id
+        self.prompt_message = prompt_message
+
+    async def on_submit(self, interaction: discord.Interaction):
+        reason = self.reason_input.value
+        channel = interaction.channel
+
+        await interaction.response.defer()
+
+        await self.cog.bot.modmail_manager.reopen_session(self.user_id)
+        self.cog.active_mod_mails[self.user_id] = channel.id
+        self.cog.active_mod_mail_channels[channel.id] = self.user_id
+        self.cog.reopen_prompts.discard(channel.id)
+
+        user = self.cog.bot.get_user(self.user_id) or await self.cog.bot.fetch_user(self.user_id)
+        if user:
+            embed = info(f"Staff has reopened your mod mail session.\n\n**Reason:**\n{reason}",
+                         self.cog.bot.user, "Mod Mail Reopened")
+            try:
+                await user.send(embed=embed)
+            except discord.Forbidden:
+                await channel.send(embed=warning("User's DMs are closed. They did not receive the reopen notice."))
+
+        try:
+            await self.prompt_message.delete()
+        except discord.NotFound:
+            pass
+
+        embed = success(f"Session reopened by {interaction.user.mention}.\n\n**Reason:** {reason}")
+        view = discord.ui.View(timeout=None)
+        view.add_item(discord.ui.Button(label="Resolve with Reason", style=discord.ButtonStyle.blurple,
+                                        custom_id=f"resolve_{self.user_id}"))
+
+        await channel.send(embed=embed, view=view)
+
+
+class ReverseReopenPromptView(discord.ui.View):
+    def __init__(self, cog, user_id: int, channel_id: int):
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.user_id = user_id
+        self.channel_id = channel_id
+        self.message = None
+
+    async def on_timeout(self):
+        self.cog.reopen_prompts.discard(self.channel_id)
+        if self.message:
+            try:
+                await self.message.delete()
+            except discord.NotFound:
+                pass
+
+    @discord.ui.button(label="Yes, Reopen", style=discord.ButtonStyle.green)
+    async def yes_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.user_id in self.cog.active_mod_mails:
+            await interaction.response.send_message(embed=
+                                                    failure("This user currently has another active mod mail session."),
+                                                    ephemeral=True)
+            self.cog.reopen_prompts.discard(self.channel_id)
+            await self.message.delete()
+            return
+
+        self.stop()
+        await interaction.response.send_modal(ReverseReopenReasonModal(self.cog, self.user_id, self.message))
+
+    @discord.ui.button(label="No", style=discord.ButtonStyle.grey)
+    async def no_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.cog.reopen_prompts.discard(self.channel_id)
+        await interaction.message.delete()
+
+
 class StaffApplicationModal(discord.ui.Modal, title="Staff Application"):
     name_input = discord.ui.TextInput(
         label="Your Name",
@@ -299,7 +381,6 @@ class ModMailAcceptView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
 
         forum_channel = interaction.guild.get_channel(mod_mail_thread_channel_id)
-        thread_name = f"modmail-{user.name}"
 
         embed = success(
             f"{mod.mention} accepted the mod mail for `{user}` (ID: {user.id}).\n\n"
@@ -310,14 +391,29 @@ class ModMailAcceptView(discord.ui.View):
         view.add_item(discord.ui.Button(label="Resolve with Reason", style=discord.ButtonStyle.blurple,
                                         custom_id=f"resolve_{user_id}"))
 
-        thread_with_message = await forum_channel.create_thread(
-            name=thread_name,
-            content=f"{mod.mention}",
-            embed=embed,
-            view=view,
-            reason=f"Mod Mail session for {user} (ID: {user.id})"
-        )
-        channel = thread_with_message.thread
+        existing_thread_id = await self.cog.bot.modmail_manager.get_user_thread(user_id)
+        channel = None
+
+        if existing_thread_id:
+            try:
+                channel = await interaction.guild.fetch_channel(existing_thread_id)
+                if channel.archived or channel.locked:
+                    await channel.edit(archived=False, locked=False, reason="Mod mail reopened by staff.")
+
+                await channel.send(content=f"{mod.mention}", embed=embed, view=view)
+            except (discord.NotFound, discord.HTTPException):
+                channel = None
+
+        if not channel:
+            thread_name = f"modmail-{user.name}"
+            thread_with_message = await forum_channel.create_thread(
+                name=thread_name,
+                content=f"{mod.mention}",
+                embed=embed,
+                view=view,
+                reason=f"Mod Mail session for {user} (ID: {user.id})"
+            )
+            channel = thread_with_message.thread
 
         self.cog.active_mod_mails[user_id] = channel.id
         self.cog.active_mod_mail_channels[channel.id] = user_id
@@ -382,6 +478,7 @@ class TortoiseDM(commands.Cog):
         self.active_bug_reports = set()
         self.active_staff_applications = set()
         self._typing_active = set()
+        self.reopen_prompts = set()
 
         # Keys are custom emoji IDs, sub-dict message is the message appearing in the bot DM,
         # callable is the method to call when that option is selected and check is callable that returns
@@ -639,6 +736,23 @@ class TortoiseDM(commands.Cog):
                     await message.channel.send(embed=failure("Could not deliver message: The user closed their DMs."))
             else:
                 await message.channel.send(embed=failure("User not found, they may have left Discord."))
+
+        elif isinstance(message.channel, discord.Thread) and message.channel.parent_id == mod_mail_thread_channel_id:
+            if message.channel.id not in self.reopen_prompts:
+                session = await self.bot.modmail_manager.get_session_by_channel(message.channel.id)
+                if session and session['status'] == 'closed':
+                    user_id = session['user_id']
+                    if user_id not in self.active_mod_mails:
+                        self.reopen_prompts.add(message.channel.id)
+                        view = ReverseReopenPromptView(self, user_id, message.channel.id)
+                        prompt_msg = await message.channel.send(
+                            embed=info_sm(f"{message.author.mention}, this mod mail is closed. Do you want to reopen it to contact the user?"),
+                            view=view
+                        )
+                        view.message = prompt_msg
+                    else:
+                        await message.channel.send(
+                            embed=failure("This user currently has another active mod mail session."))
 
     async def close_mod_mail(self, user_id: int, channel: discord.Thread, closed_by: Union[discord.Member, str],
                              reason: str = None, archive_thread: bool = True):
