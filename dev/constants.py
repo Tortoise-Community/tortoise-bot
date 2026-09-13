@@ -61,6 +61,7 @@ challenge_logs_public_channel_id = 1524679248219213864
 bait_channel_id = 1520372693294125167
 introduction_channel_id = 1520372692090359897
 join_a_team_channel_id = 1520372692446871665
+mod_mail_thread_channel_id = 1546921962339835914
 
 # Marketplace channels
 job_board_channel_id = 1520372693067632693
@@ -95,6 +96,10 @@ elite_role_id = 1520372691469729957
 
 mod_mail_ping_role_id = 1520372691448889367
 bot_trap_role_id = 1520372691448889365
+
+# Constants
+today_i_did_cooldown = 60 * 60 * 4
+today_i_did_warning = 60 * 60
 
 promotable_roles = {
     wizard_role_id: "You are currently **#1 on the Challenges Leaderboard**, placing you at the top "
@@ -185,12 +190,15 @@ automatically_assigned_roles = {
 
 
 # Emoji IDs
-mod_mail_emoji_id = 1529488959665733662
+mod_mail_emoji_id = 1546914838733791362
 event_emoji_id = 611403448750964746
-bug_emoji_id = 1529489689222840673
+bug_emoji_id = 1546914803988177077
 verified_emoji_id = 610713784268357632
 upvote_emoji_id = 741202481090002994
 staff_application_emoji_id = 1485325243043283075
+
+# mod_mail_emoji_id = 1546903141671239680
+# bug_emoji_id = 1546906168742518854
 
 # Auto mod rulesets
 racial_and_transphobic_rule_id = 1461221874540347577
@@ -223,6 +231,7 @@ git_fork_emoji = "<:git_fork:758616130780004362>"
 git_commit_emoji = "<:git_commit:758616123590574090>"
 git_repo_emoji = "<:repo:758616137977561119>"
 success_emoji = "<:success:1524706961172463646>"
+info_emoji = "<:info:1546914814796763166>"
 failure_emoji = "<:failure:1524706674550767706>"
 warning_low_emoji = "<:warninglow:1524706548301959199>"
 warning_high_emoji = "<:warninghigh:1524706535073120297>"

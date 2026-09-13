@@ -138,9 +138,12 @@ After running the command, paste your function implementation into the popup.
 **Behavior**
 
 - Runs the submitted code against hidden tests.
+- Saves the submitted source code with the submission record.
 - Uses the selected language boilerplate.
 - Awards points only if all tests pass.
 - Does not award duplicate points for already-solved problems.
+- Posts accepted submissions with a public **See solution** button. The source is returned privately as a spoiler file.
+- Moderators can award one **Optimal solution** bonus of 50 points from the moderator-only submission log.
 
 #### `/challenge reveal-tests`
 
@@ -184,13 +187,14 @@ Creates or updates a coding problem.
 | Option | Required | Description |
 |---|---:|---|
 | `title` | Yes | Problem title. |
-| `statement` | Yes | Markdown/text file containing the problem statement. |
-| `python_boilerplate` | Yes | Python starter/driver file containing `{{SOLUTION}}`. |
-| `javascript_boilerplate` | Yes | JavaScript starter/driver file containing `{{SOLUTION}}`. |
-| `cpp_boilerplate` | Yes | C++ starter/driver file containing `{{SOLUTION}}`. |
-| `java_boilerplate` | Yes | Java starter/driver file containing `{{SOLUTION}}`. |
-| `test_inputs` | Yes | JSON array of input strings. |
-| `expected_outputs` | Yes | JSON array of expected output strings. |
+| `bulk` | Yes | Use one follow-up message containing all seven files. |
+| `statement` | When `bulk:false` | Markdown/text file containing the problem statement. |
+| `python_boilerplate` | When `bulk:false` | Python starter/driver file containing `{{SOLUTION}}`. |
+| `javascript_boilerplate` | When `bulk:false` | JavaScript starter/driver file containing `{{SOLUTION}}`. |
+| `cpp_boilerplate` | When `bulk:false` | C++ starter/driver file containing `{{SOLUTION}}`. |
+| `java_boilerplate` | When `bulk:false` | Java starter/driver file containing `{{SOLUTION}}`. |
+| `test_inputs` | When `bulk:false` | JSON array of input strings. |
+| `expected_outputs` | When `bulk:false` | JSON array of expected output strings. |
 
 **Test file format**
 
@@ -221,6 +225,18 @@ Each boilerplate must contain:
 ```
 
 The bot replaces that marker with the submitted function.
+
+With `bulk:true`, attach these exact filenames to your next message in the channel:
+
+- `statement.md`
+- `python-boilerplate.py`
+- `javascript-boilerplate.js`
+- `cpp-boilerplate.cpp`
+- `java-boilerplate.java`
+- `test-inputs.json`
+- `expected-outputs.json`
+
+The bot matches each file by name and applies the same validation as manual mode. The upload expires after three minutes.
 
 #### `/challenge remove`
 
@@ -311,6 +327,7 @@ Tests the full judge flow using a small `add(a, b)` problem:
 ### Notes
 
 - Accepted submissions are logged to the challenge log channel.
+- Public accepted-submission logs include only **See solution**; the optimal-bonus button is posted in the moderator log.
 - A full accepted solve awards 100 points.
 - Duplicate accepted solves do not award points again.
 - Test reveal costs 50 points only the first time per user per problem.
