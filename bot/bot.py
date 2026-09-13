@@ -17,7 +17,8 @@ from bot.api_client import TortoiseAPI
 from bot.constants import bot_log_channel_id, github_repo_link
 from bot.manager import (
     Database, ProgressionManager, AFKManager, PointsManager, ChallengeManager,
-    RetentionManager, TeamManager, GiveawayManager, DutyManager, ModMailManager
+    RetentionManager, TeamManager, GiveawayManager, DutyManager, ModMailManager,
+    MessageManager
 )
 from bot.utils.embed_handler import simple_embed
 from bot.utils.error_handler import TortoiseCommandTree
@@ -83,6 +84,7 @@ class Bot(commands.Bot):
         self.giveaway_manager = None
         self.duty_manager = None
         self.modmail_manager = None
+        self.message_manager = None
         self._sys_log_channel = None
 
         if DEVELOPMENT_MODE:
@@ -185,6 +187,7 @@ class Bot(commands.Bot):
             self.giveaway_manager = GiveawayManager(self.db)
             self.duty_manager = DutyManager(self.db)
             self.modmail_manager = ModMailManager(self.db)
+            self.message_manager = MessageManager(self.db)
 
             await self.progression_manager.setup()
             await self.afk_manager.setup()
@@ -195,6 +198,7 @@ class Bot(commands.Bot):
             await self.giveaway_manager.setup()
             await self.duty_manager.setup()
             await self.modmail_manager.setup()
+            await self.message_manager.setup()
 
         await self.load_extensions()
         # await self.reload_tortoise_meta_cache()

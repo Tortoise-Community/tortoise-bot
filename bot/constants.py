@@ -113,6 +113,10 @@ channels_emoji_id = 1534124243640385536
 mod_mail_ping_role_id = 1493890424518086807
 bot_trap_role_id = 1505158956811685908
 
+# Constants
+today_i_did_cooldown = 60 * 60 * 8
+today_i_did_warning = 60 * 60
+
 promotable_roles = {
     wizard_role_id:      "You are currently **#1 on the Challenges Leaderboard**, placing you at the top "
                          "of the server's competitive coding ranks.\n\n"

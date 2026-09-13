@@ -97,6 +97,10 @@ elite_role_id = 1520372691469729957
 mod_mail_ping_role_id = 1520372691448889367
 bot_trap_role_id = 1520372691448889365
 
+# Constants
+today_i_did_cooldown = 60 * 60 * 4
+today_i_did_warning = 60 * 60
+
 promotable_roles = {
     wizard_role_id: "You are currently **#1 on the Challenges Leaderboard**, placing you at the top "
                          "of the server's competitive coding ranks.\n\n"

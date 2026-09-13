@@ -1330,3 +1330,61 @@ class ModMailManager:
         await self.db.pool.execute(
             "UPDATE modmail_sessions SET status='open' WHERE user_id=$1", user_id
         )
+
+
+class MessageManager:
+    def __init__(self, db: Database):
+        self.db = db
+
+    async def setup(self):
+        await self.db.pool.execute(
+            """
+            CREATE TABLE IF NOT EXISTS messages (
+                user_id BIGINT NOT NULL,
+                channel_id BIGINT NOT NULL,
+                message_id BIGINT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                deleted_at TIMESTAMPTZ,
+                PRIMARY KEY (user_id, channel_id, message_id)
+            )
+            """
+        )
+
+    async def create_message(self, user_id, channel_id, message_id):
+        await self.db.pool.execute(
+            """
+            INSERT INTO messages (
+                user_id,
+                channel_id,
+                message_id
+            ) VALUES ($1, $2, $3)
+            """,
+            user_id,
+            channel_id,
+            message_id
+        )
+
+    async def get_latest_message(self, user_id, channel_id):
+        return await self.db.pool.fetchrow(
+            """
+            SELECT *
+            FROM messages
+            WHERE user_id = $1
+                AND channel_id = $2
+                AND deleted_at IS NULL
+            ORDER BY created_at DESC
+            """,
+            user_id,
+            channel_id
+        )
+
+    async def mark_message_deleted(self, message_id):
+        return await self.db.pool.execute(
+            """
+            UPDATE messages
+            SET deleted_at = NOW()
+            WHERE message_id = $1
+                AND deleted_at IS NULL
+            """,
+            message_id
+        )

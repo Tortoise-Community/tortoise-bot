@@ -93,9 +93,10 @@ class ReverseReopenPromptView(discord.ui.View):
     @discord.ui.button(label="Yes, Reopen", style=discord.ButtonStyle.green)
     async def yes_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         if self.user_id in self.cog.active_mod_mails:
-            await interaction.response.send_message(embed=
-                                                    failure("This user currently has another active mod mail session."),
-                                                    ephemeral=True)
+            await interaction.response.send_message(
+                embed=failure("This user currently has another active mod mail session."),
+                ephemeral=True
+            )
             self.cog.reopen_prompts.discard(self.channel_id)
             await self.message.delete()
             return
@@ -201,7 +202,6 @@ class ModMailCloseReasonModal(discord.ui.Modal, title="Close Mod Mail with Respo
                 pass
 
         await self.cog.close_mod_mail(user_id, channel, closed_by=mod, reason=staff_response, archive_thread=True)
-
 
 
 class ModMailReasonModal(discord.ui.Modal, title="Contact Staff (Mod Mail)"):
@@ -746,7 +746,8 @@ class TortoiseDM(commands.Cog):
                         self.reopen_prompts.add(message.channel.id)
                         view = ReverseReopenPromptView(self, user_id, message.channel.id)
                         prompt_msg = await message.channel.send(
-                            embed=info_sm(f"{message.author.mention}, this mod mail is closed. Do you want to reopen it to contact the user?"),
+                            embed=info_sm(f"{message.author.mention}, this mod mail is closed. "
+                                          f"Do you want to reopen it to contact the user?"),
                             view=view
                         )
                         view.message = prompt_msg
@@ -856,7 +857,8 @@ class TortoiseDM(commands.Cog):
             view=None
     ):
 
-        if not message.embeds: return
+        if not message.embeds:
+            return
 
         embed = message.embeds[0]
 
@@ -988,16 +990,18 @@ class TortoiseDM(commands.Cog):
             return None
         return user_reply_content
 
-    async def _wait_for(self, container: set, user: discord.User, sub_type: str, sub_format=None) -> Union[
-        discord.Message, None]:
+    async def _wait_for(self, container: set, user: discord.User, sub_type: str, sub_format=None) \
+            -> Union[discord.Message, None]:
         def check(msg):
             return msg.guild is None and msg.author == user
 
         container.add(user.id)
-        if sub_format is not None: sub_format = "\n" + sub_format
+        if sub_format is not None:
+            sub_format = "\n" + sub_format
 
         await user.send(embed=info(
-            f"Reply with single message or link to paste service or upload a `.txt` file.\nType `cancel` to cancel right away.\n\n{'**Format: **' + sub_format if sub_format else ''}",
+            f"Reply with single message or link to paste service or upload a `.txt` file.\n"
+            f"Type `cancel` to cancel right away.\n\n{'**Format: **' + sub_format if sub_format else ''}",
             user, sub_type + " Initialized", "This submission will timeout in 5 minutes.")
         )
 
