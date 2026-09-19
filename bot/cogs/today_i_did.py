@@ -1,7 +1,7 @@
-import asyncio
 from datetime import datetime, timedelta, timezone
 
 import discord
+from discord import MessageType
 from discord.ext import commands
 
 from bot import bot
@@ -9,6 +9,7 @@ from bot.constants import (
     today_i_did_channel_id, today_i_did_cooldown, today_i_did_warning
 )
 from bot.utils.embed_handler import warning, info_sm
+from bot.utils.misc import get_countdown
 
 
 class TodayIDidCog(commands.Cog):
@@ -25,6 +26,9 @@ class TodayIDidCog(commands.Cog):
         author = message.author
 
         if author.bot:
+            return
+
+        if message.type != MessageType.default and message.type != MessageType.reply:
             return
 
         if channel_id != today_i_did_channel_id:
@@ -60,21 +64,18 @@ class TodayIDidCog(commands.Cog):
             )
 
             if now < next_allowed_at:
-                timestamp = int(next_allowed_at.timestamp())
-
+                remaining_time = get_countdown(next_allowed_at)
                 warning_embed = warning(
                     "You've already shared your progress recently. "
-                    f"Come back <t:{timestamp}:R> :hourglass:\n\n"
+                    f"Come back in {remaining_time} :hourglass:\n\n"
                     "-# If you'd like to add more points, please edit your "
                     "existing message or create a thread instead."
                 )
 
                 try:
                     await message.delete()
-                    warn_message = await message.channel.send(embed=warning_embed)
+                    await message.channel.send(embed=warning_embed, delete_after=5)
 
-                    await asyncio.sleep(5)
-                    await warn_message.delete()
                 except discord.HTTPException:
                     pass
 
