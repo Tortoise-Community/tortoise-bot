@@ -13,6 +13,17 @@ import discord
 from bot.constants import challenge_supported_language_values
 
 
+CHALLENGE_ATTACHMENT_FILENAMES = (
+    "statement.md",
+    "python-boilerplate.py",
+    "javascript-boilerplate.js",
+    "cpp-boilerplate.cpp",
+    "java-boilerplate.java",
+    "test-inputs.json",
+    "expected-outputs.json",
+)
+
+
 @dataclass(slots=True)
 class TestCase:
     name: str
@@ -102,6 +113,27 @@ async def download_text(attachment: discord.Attachment, *, max_bytes: int) -> st
         return data.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise ValueError(f"{attachment.filename} must be UTF-8 text.") from exc
+
+
+def arrange_challenge_attachments(
+    attachments: list[discord.Attachment],
+) -> dict[str, discord.Attachment]:
+    arranged = {attachment.filename: attachment for attachment in attachments}
+    duplicates = sorted(
+        filename for filename in arranged if sum(a.filename == filename for a in attachments) > 1
+    )
+    missing = sorted(set(CHALLENGE_ATTACHMENT_FILENAMES) - arranged.keys())
+    unexpected = sorted(arranged.keys() - set(CHALLENGE_ATTACHMENT_FILENAMES))
+    problems = []
+    if missing:
+        problems.append(f"missing: {', '.join(missing)}")
+    if unexpected:
+        problems.append(f"unexpected: {', '.join(unexpected)}")
+    if duplicates:
+        problems.append(f"duplicated: {', '.join(duplicates)}")
+    if problems:
+        raise ValueError("Invalid challenge files (" + "; ".join(problems) + ").")
+    return {filename: arranged[filename] for filename in CHALLENGE_ATTACHMENT_FILENAMES}
 
 
 def positive_integer_env(name: str, fallback: int) -> int:

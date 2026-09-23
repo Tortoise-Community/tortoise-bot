@@ -143,6 +143,26 @@ def format_timedelta(time_delta: datetime.timedelta) -> str:
     return f"{days}d {hours}h {minutes}m and {seconds}s"
 
 
+def get_countdown(endtime: datetime.datetime) -> str:
+    now = datetime.datetime.now(datetime.timezone.utc)
+    total_seconds = int((endtime - now).total_seconds())
+
+    if total_seconds <= 0:
+        return "0s"
+
+    days, remainder = divmod(total_seconds, 60 * 60 * 24)
+    hours, remainder = divmod(remainder, 60 * 60)
+    minutes, seconds = divmod(remainder, 60)
+
+    if days > 0:
+        return f"{days}d {hours}h {minutes}m and {seconds}s"
+    if hours > 0:
+        return f"{hours}h {minutes}m and {seconds}s"
+    if minutes > 0:
+        return f"{minutes}m and {seconds}s"
+    return f"{seconds}s"
+
+
 def get_utc_time_until(
         year: int,
         month: int,
