@@ -66,8 +66,8 @@ class TodayIDidCog(commands.Cog):
             if now < next_allowed_at:
                 remaining_time = get_countdown(next_allowed_at)
                 warning_embed = warning(
-                    "You've already shared your progress recently. "
-                    f"Come back in {remaining_time} :hourglass:\n\n"
+                    "**You've already shared your progress recently.**\n\n"
+                    f"_Come back in {remaining_time} :hourglass:_\n\n"
                     "-# If you'd like to add more points, please edit your "
                     "existing message or create a thread instead."
                 )
