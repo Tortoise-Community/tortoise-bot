@@ -611,6 +611,45 @@ class TortoiseDM(commands.Cog):
 
     @classmethod
     def _build_embeds(cls, message: discord.Message, base_embed: discord.Embed) -> list[discord.Embed]:
+        if message.message_snapshots:
+            snapshots = []
+            for snapshot in message.message_snapshots:
+                snap_text = snapshot.content or ""
+
+                snapshot_imgs = [
+                    att for att in snapshot.attachments
+                    if att.content_type and att.content_type.startswith("image/")
+                ]
+                snapshot_attachments = [
+                    att for att in snapshot.attachments
+                    if att not in snapshot_imgs
+                ]
+
+                if snapshot_attachments:
+                    links = "\n".join(f"[{att.filename}]({att.url})" for att in snapshot_attachments)
+                    snap_text = f"{snap_text}\n\n**Forwarded Attachments:**\n{links}".strip()
+
+                if snap_text:
+                    base_embed.add_field(
+                        name="Forwarded Message",
+                        value=snap_text[:1024],
+                        inline=False
+                    )
+
+                if snapshot_imgs:
+                    if not base_embed.image.url:
+                        base_embed.set_image(url=snapshot_imgs[0].url)
+                    for att in snapshot_imgs[1:10]:
+                        extra = discord.Embed(color=default_color)
+                        extra.set_image(url=att.url)
+                        snapshots.append(extra)
+
+                for emb in snapshot.embeds:
+                    snapshots.append(emb)
+
+            if snapshots:
+                return [base_embed] + snapshots
+
         image_attachments = [
             att for att in message.attachments
             if att.content_type and att.content_type.startswith("image/")
@@ -627,6 +666,8 @@ class TortoiseDM(commands.Cog):
             ).strip()
 
         if not image_attachments:
+            if not base_embed.description and not base_embed.fields:
+                base_embed.description = "*[Forwarded message without text]*"
             return [base_embed]
 
         embeds = []
@@ -711,7 +752,8 @@ class TortoiseDM(commands.Cog):
                 channel = self.bot.get_channel(channel_id)
 
                 if channel:
-                    embed = discord.Embed(description=message.content, color=default_color)
+                    content = message.content or None
+                    embed = discord.Embed(description=content, color=default_color)
                     embed.set_author(name=f"{message.author.name} (User)", icon_url=message.author.display_avatar.url)
                     embeds = self._build_embeds(message, embed)
 
@@ -725,7 +767,8 @@ class TortoiseDM(commands.Cog):
             user_id = self.active_mod_mail_channels[message.channel.id]
             user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)
             if user:
-                embed = discord.Embed(description=message.content, color=default_color)
+                content = message.content or None
+                embed = discord.Embed(description=content, color=default_color)
                 embed.set_author(name=f"{message.author.display_name}",
                                  icon_url=message.author.display_avatar.url)
                 embeds = self._build_embeds(message, embed)
