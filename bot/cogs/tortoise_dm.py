@@ -188,18 +188,31 @@ class ModMailCloseReasonModal(discord.ui.Modal, title="Close Mod Mail with Respo
         staff_response = self.response_input.value
 
         channel_id = self.cog.active_mod_mails.get(user_id)
-        if not channel_id:
+
+        is_pending = user_id in self.cog.pending_mod_mails
+
+        if not channel_id and not is_pending:
             await interaction.response.send_message("This mod mail is no longer active.", ephemeral=True)
             return
 
-        channel = interaction.guild.get_thread(channel_id)
         await interaction.response.defer(ephemeral=True)
+
+        channel = None
+        if channel_id:
+            channel = interaction.guild.get_thread(channel_id) or interaction.guild.get_channel(channel_id)
+            if channel is None:
+                try:
+                    channel = await interaction.guild.fetch_channel(channel_id)
+                except (discord.NotFound, discord.HTTPException):
+                    channel = None
 
         if channel:
             try:
                 await interaction.followup.send(embed=info_sm("Closing modmail..."), ephemeral=True)
             except discord.HTTPException:
                 pass
+        else:
+            await interaction.followup.send(embed=info_sm("Resolving ticket..."), ephemeral=True)
 
         await self.cog.close_mod_mail(user_id, channel, closed_by=mod, reason=staff_response, archive_thread=True)
 
@@ -1109,6 +1122,119 @@ class TortoiseDM(commands.Cog):
         if self.mod_mail_ping_role in interaction.user.roles:
             await interaction.user.remove_roles(self.mod_mail_ping_role, reason="Schedule deleted.")
         await interaction.response.send_message(embed=success("Your ping schedule has been deleted."), ephemeral=True)
+
+    @mod_mail_group.command(name="open", description="Manually open a reverse mod mail session with a user.")
+    @app_commands.describe(
+        user="The user to initiate mod mail with",
+        reason="The reason for opening mod mail"
+    )
+    @app_commands.default_permissions(manage_messages=True)
+    @app_commands.check(check_if_tortoise_staff)
+    async def open_reverse_modmail(
+        self,
+        interaction: discord.Interaction,
+        user: discord.User,
+        reason: str
+    ):
+        mod = interaction.user
+
+        if user.bot:
+            await interaction.response.send_message(
+                embed=failure("Cannot open mod mail with a bot."),
+                ephemeral=True
+            )
+            return
+
+        if self.is_any_session_active(user.id) or user.id in self.pending_mod_mails:
+            await interaction.response.send_message(
+                embed=failure("This user already has an active or pending session."),
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.defer(ephemeral=True)
+
+        forum_channel = interaction.guild.get_channel(mod_mail_thread_channel_id)
+        if not forum_channel:
+            await interaction.followup.send(
+                embed=failure("Mod mail thread/forum channel not found."),
+                ephemeral=True
+            )
+            return
+
+        embed = success(
+            f"{mod.mention} initiated reverse mod mail with `{user}` (ID: {user.id}).\n\n"
+            f"**Reason:**\n{reason}\n\n"
+            "Use the Resolve button below or archive the thread to close."
+        )
+
+        view = discord.ui.View(timeout=None)
+        view.add_item(
+            discord.ui.Button(
+                label="Resolve with Reason",
+                style=discord.ButtonStyle.blurple,
+                custom_id=f"resolve_{user.id}"
+            )
+        )
+
+        existing_thread_id = await self.bot.modmail_manager.get_user_thread(user.id)
+        channel = None
+
+        if existing_thread_id:
+            try:
+                channel = await interaction.guild.fetch_channel(existing_thread_id)
+                if channel.archived or channel.locked:
+                    await channel.edit(archived=False, locked=False, reason=f"Reverse mod mail initiated by {mod.name}")
+                await channel.send(content=f"{mod.mention}", embed=embed, view=view)
+            except (discord.NotFound, discord.HTTPException):
+                channel = None
+
+        if not channel:
+            thread_name = f"modmail-{user.name}"
+            thread_with_message = await forum_channel.create_thread(
+                name=thread_name,
+                content=f"{mod.mention}",
+                embed=embed,
+                view=view,
+                reason=f"Reverse Mod Mail session for {user} (ID: {user.id}) initiated by {mod.name}"
+            )
+            channel = thread_with_message.thread
+
+        self.active_mod_mails[user.id] = channel.id
+        self.active_mod_mail_channels[channel.id] = user.id
+        self.reopen_prompts.discard(channel.id)
+
+        staff_log_embed = authored(
+            f"Reverse mod mail initiated with `{user}` by {mod.mention}.",
+            author=user
+        )
+        staff_log_embed.add_field(name="Reason", value=reason, inline=False)
+        staff_log_embed.description = f"Ticket thread: {channel.mention}"
+        staff_log_embed.color = discord.Color.green()
+
+        staff_log_msg = await self.staff_channel.send(embed=staff_log_embed)
+        self.modmail_messages[user.id] = staff_log_msg.id
+
+        await self.bot.modmail_manager.create_session(user.id, channel.id, staff_log_msg.id)
+
+        user_dm_embed = info(
+            f"The staff team has opened a mod mail session with you.\n\n"
+            f"**Reason:**\n{reason}\n\n"
+            "Reply directly to this DM to converse with the staff team.",
+            self.bot.user,
+            "Mod Mail Opened by Staff"
+        )
+        user_dm_embed.set_footer(text="Tortoise Programming Community")
+
+        try:
+            await user.send(embed=user_dm_embed)
+        except discord.Forbidden:
+            await channel.send(embed=warning("User's DMs are closed or they have blocked the bot. They did not receive the initial DM."))
+
+        await interaction.followup.send(
+            embed=success(f"Mod mail session initialized in {channel.mention}"),
+            ephemeral=True
+        )
 
 
 async def setup(bot):
