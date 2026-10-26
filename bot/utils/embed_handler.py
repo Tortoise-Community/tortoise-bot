@@ -126,6 +126,10 @@ def info(message: str, member: Union[Member, User, ClientUser], title: str = "In
     return embed
 
 
+def info_sm(message: str) -> Embed:
+    return simple_embed(f"{constants.info_emoji}︱{message}", "", constants.default_color)
+
+
 def success(message: str, member: Union[Member, User] = None) -> Embed:
     """
     Constructs success embed with fixed title 'Success' and color depending

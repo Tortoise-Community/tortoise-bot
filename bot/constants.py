@@ -64,6 +64,7 @@ challenge_logs_public_channel_id = 1524682332005728257
 bait_channel_id = 1461666781612740750
 introduction_channel_id = 1487413734056923236
 join_a_team_channel_id = 1489264049983197246
+mod_mail_thread_channel_id = 1546927039553216552
 
 # Team channels
 team_plan_channel_id = 1498315759506686115
@@ -111,6 +112,10 @@ channels_emoji_id = 1534124243640385536
 
 mod_mail_ping_role_id = 1493890424518086807
 bot_trap_role_id = 1505158956811685908
+
+# Constants
+today_i_did_cooldown = 60 * 60 * 8
+today_i_did_warning = 60 * 60
 
 promotable_roles = {
     wizard_role_id:      "You are currently **#1 on the Challenges Leaderboard**, placing you at the top "
@@ -203,9 +208,9 @@ automatically_assigned_roles = {
 
 
 # Emoji IDs
-mod_mail_emoji_id = 706195614857297970
+mod_mail_emoji_id = 1546914153741156372
 event_emoji_id = 611403448750964746
-bug_emoji_id = 723274927968354364
+bug_emoji_id = 1546914117002993714
 verified_emoji_id = 610713784268357632
 upvote_emoji_id = 741202481090002994
 staff_application_emoji_id = 1485325243043283075
@@ -221,6 +226,7 @@ challenge_supported_language_values = tuple(
     language_value for _, language_value in challenge_supported_languages
 )
 challenge_default_points = 100
+challenge_optimal_solution_bonus = 50
 challenge_test_reveal_cost = 50
 challenge_default_max_tests = 30
 challenge_problem_title_min_length = 2
@@ -315,6 +321,7 @@ git_fork_emoji = "<:git_fork:758616130780004362>"
 git_commit_emoji = "<:git_commit:758616123590574090>"
 git_repo_emoji = "<:repo:758616137977561119>"
 success_emoji = "<:success:1522613769094693048>"
+info_emoji = "<:info:1546914206228553729>"
 failure_emoji = "<:failure:1522613811033538681>"
 warning_low_emoji = "<:warninglow:1524707529416769596>"
 warning_high_emoji = "<:warninghigh:1524707516636991528>"

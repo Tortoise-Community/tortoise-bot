@@ -75,8 +75,12 @@ class AntiRaidSpam(commands.Cog):
         if message.author.bot or message.guild is None or message.guild.id != tortoise_guild_id:
             return
 
-        member = message.author
         guild = message.guild
+        member = guild.get_member(message.author.id)
+
+        if member is None:
+            return
+
         now = time.time()
 
         if member.guild_permissions.manage_messages:
