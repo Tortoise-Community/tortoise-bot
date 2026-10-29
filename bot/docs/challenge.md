@@ -238,6 +238,17 @@ With `bulk:true`, attach these exact filenames to your next message in the chann
 
 The bot matches each file by name and applies the same validation as manual mode. The upload expires after three minutes.
 
+#### `/challenge edit`
+
+Changes only the supplied fields of an existing active problem. Staff can update its title, points, statement, any individual language boilerplate, or hidden tests. The problem slug stays the same so existing submissions and solves remain linked.
+
+```text
+/challenge edit problem:two-sum points:150
+/challenge edit problem:two-sum statement:<statement.md>
+```
+
+To replace hidden tests, attach both `test_inputs` and `expected_outputs`. Replacement boilerplates must contain `{{SOLUTION}}`. Point changes apply only to future solves, and previous submissions are not rejudged.
+
 #### `/challenge remove`
 
 Deactivates a problem.

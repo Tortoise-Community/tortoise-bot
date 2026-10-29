@@ -589,6 +589,129 @@ class Challenges(commands.Cog):
         )
         return tests
 
+    async def _read_edit_attachments(
+        self,
+        statement: Optional[discord.Attachment],
+        boilerplate_files: dict[str, Optional[discord.Attachment]],
+        test_inputs: Optional[discord.Attachment],
+        expected_outputs: Optional[discord.Attachment],
+    ) -> tuple[Optional[str], dict[str, str], Optional[list[TestCase]]]:
+        if (test_inputs is None) != (expected_outputs is None):
+            raise ValueError("Provide both test_inputs and expected_outputs to replace hidden tests.")
+
+        new_statement = None
+        if statement is not None:
+            new_statement = await download_text(statement, max_bytes=challenge_statement_max_bytes)
+            if not new_statement.strip():
+                raise ValueError("Problem statement cannot be empty.")
+
+        boilerplates = {}
+        for language, attachment in boilerplate_files.items():
+            if attachment is None:
+                continue
+            content = await download_text(attachment, max_bytes=challenge_boilerplate_max_bytes)
+            if "{{SOLUTION}}" not in content:
+                raise ValueError(f"{language} boilerplate must contain a {{{{SOLUTION}}}} marker.")
+            boilerplates[language] = content
+
+        tests = None
+        if test_inputs is not None:
+            tests = parse_test_files(
+                await download_text(test_inputs, max_bytes=challenge_tests_max_bytes),
+                await download_text(expected_outputs, max_bytes=challenge_tests_max_bytes),
+                self.max_tests,
+            )
+        return new_statement, boilerplates, tests
+
+    @challenge_group.command(name="edit", description="Edit selected fields of a coding problem.")
+    @app_commands.check(check_if_tortoise_staff)
+    @app_commands.autocomplete(problem=challenge_problem_autocomplete)
+    @app_commands.describe(
+        problem="Existing problem title/slug.",
+        title="New display title; the slug stays the same.",
+        points="Points awarded for future solves.",
+        statement="Replacement Markdown/text problem statement.",
+        python_boilerplate="Replacement Python starter file.",
+        javascript_boilerplate="Replacement JavaScript starter file.",
+        cpp_boilerplate="Replacement C++ starter file.",
+        java_boilerplate="Replacement Java starter file.",
+        test_inputs="Replacement JSON inputs; also provide expected_outputs.",
+        expected_outputs="Replacement JSON outputs; also provide test_inputs.",
+    )
+    async def challenge_edit(
+        self,
+        interaction: discord.Interaction,
+        problem: str,
+        title: Optional[
+            app_commands.Range[str, challenge_problem_title_min_length, challenge_problem_title_max_length]
+        ] = None,
+        points: Optional[int] = None,
+        statement: Optional[discord.Attachment] = None,
+        python_boilerplate: Optional[discord.Attachment] = None,
+        javascript_boilerplate: Optional[discord.Attachment] = None,
+        cpp_boilerplate: Optional[discord.Attachment] = None,
+        java_boilerplate: Optional[discord.Attachment] = None,
+        test_inputs: Optional[discord.Attachment] = None,
+        expected_outputs: Optional[discord.Attachment] = None,
+    ):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            slug = clean_slug(problem)
+            new_title = str(title).strip() if title is not None else None
+            if new_title is not None and len(new_title) < challenge_problem_title_min_length:
+                raise ValueError("Title must contain at least two characters.")
+            if points is not None and points <= 0:
+                raise ValueError("Points must be a positive number.")
+            new_statement, boilerplates, tests = await self._read_edit_attachments(
+                statement,
+                {
+                    "python": python_boilerplate,
+                    "javascript": javascript_boilerplate,
+                    "cpp": cpp_boilerplate,
+                    "java": java_boilerplate,
+                },
+                test_inputs,
+                expected_outputs,
+            )
+
+            changed = []
+            if new_title is not None:
+                changed.append("title")
+            if points is not None:
+                changed.append("points")
+            if new_statement is not None:
+                changed.append("statement")
+            changed.extend(f"{language} boilerplate" for language in boilerplates)
+            if tests is not None:
+                changed.append("hidden tests")
+            if not changed:
+                raise ValueError("Provide at least one field to edit.")
+
+            updated = await self.challenge_manager.update_problem(
+                guild_id=interaction.guild_id,
+                slug=slug,
+                title=new_title,
+                statement=new_statement,
+                points=points,
+                boilerplates=boilerplates,
+                tests=tests,
+            )
+        except ValueError as exc:
+            await interaction.followup.send(embed=failure(str(exc)), ephemeral=True)
+            return
+        except Exception:
+            logger.exception("Could not edit challenge problem")
+            await interaction.followup.send(embed=failure("Could not edit problem."), ephemeral=True)
+            return
+
+        if not updated:
+            await interaction.followup.send(embed=failure("Active problem not found."), ephemeral=True)
+            return
+        await interaction.followup.send(
+            embed=success(f"Updated `{slug}`: {', '.join(changed)}."),
+            ephemeral=True,
+        )
+
     @challenge_group.command(name="remove", description="Deactivate a coding problem.")
     @app_commands.check(check_if_tortoise_staff)
     @app_commands.autocomplete(problem=challenge_problem_autocomplete)
