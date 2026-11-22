@@ -560,6 +560,40 @@ class ChallengeManager:
             challenge_default_points,
         )
 
+    async def update_problem(
+        self,
+        *,
+        guild_id: int,
+        slug: str,
+        title: Optional[str] = None,
+        statement: Optional[str] = None,
+        points: Optional[int] = None,
+        boilerplates: Optional[dict[str, str]] = None,
+        tests: Optional[list[TestCase]] = None,
+    ) -> bool:
+        result = await self.db.pool.execute(
+            """
+            UPDATE challenge_problems
+            SET title = COALESCE($3, title),
+                statement = COALESCE($4, statement),
+                points = COALESCE($5, points),
+                boilerplates = boilerplates || $6::jsonb,
+                tests = COALESCE($7::jsonb, tests)
+            WHERE guild_id = $1 AND slug = $2 AND active = TRUE
+            """,
+            guild_id,
+            slug,
+            title,
+            statement,
+            points,
+            json.dumps(boilerplates or {}),
+            json.dumps([
+                {"name": test.name, "input": test.input, "expected": test.expected}
+                for test in tests
+            ]) if tests is not None else None,
+        )
+        return result == "UPDATE 1"
+
     async def get_problem(self, guild_id: int, slug: str) -> Optional[Problem]:
         row = await self.db.pool.fetchrow(
             """
